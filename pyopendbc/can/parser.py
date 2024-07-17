@@ -1,38 +1,28 @@
-#include <algorithm>
-#include <cassert>
-#include <cstring>
-#include <limits>
-#include <stdexcept>
-#include <sstream>
-
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-
-#include "opendbc/can/common.h"
-
 from collections import defaultdict
 import sys
 import numbers
+import numpy as np
+
+# from ..utils import Event
 
 from .common import MAX_BAD_COUNTER, CAN_INVALID_CNT
 from .common_dbc import SignalType, SignalValue
 from .dbc import dbc_lookup
 
-IULL = 1 # 1ULL
+IULL = np.uint64(1) # 1ULL
 
 def get_raw_value(msg, sig):
   ret = 0
 
-  i = sig.msb / 8
+  i = sig.msb // 8
   bits = sig.size
-  while (i >= 0 and i < msg.size() and bits > 0):
-    lsb = sig.lsb if (sig.lsb / 8) == i else i*8
-    msb = sig.msb if (sig.msb / 8) == i else (i+1)*8 - 1
+  while (i >= 0 and i < len(msg) and bits > 0):
+    lsb = sig.lsb if (sig.lsb // 8) == i else i*8
+    msb = sig.msb if (sig.msb // 8) == i else (i+1)*8 - 1
     size = msb - lsb + 1
 
-    d = (msg[i] >> (lsb - (i*8))) & ((IULL << size) - 1)
+    d = np.uint64((np.uint8(msg[i]) >> (lsb - (i*8))) & ((IULL << size) - 1))
+    # print("bits, size", bits, size)
     ret |= d << (bits - size)
 
     bits -= size
@@ -56,26 +46,31 @@ class MessageState:
     self.counter = 0
     self.counter_fail = 0
 
-    self.ignore_checksum = False
-    self.ignore_counter = False
+    self.ignore_checksum = True
+    self.ignore_counter = True
 
   # bool parse(uint64_t nanos, const std::vector<uint8_t> &dat);
   def parse(self, nanos, dat):
-    tmp_vals = [0.0 for i in range(len(self.parse_sigs))]
+    # tmp_vals = [0.0 for i in range(len(self.parse_sigs))]
+    tmp_vals = []
     checksum_failed = False
     counter_failed = False
 
     for i in range(len(self.parse_sigs)):
       sig = self.parse_sigs[i]
 
+
       tmp = get_raw_value(dat, sig)
       if (sig.is_signed):
         tmp -= IULL << sig.size if ((tmp >> (sig.size-1)) & 0x1) else 0
+      
+
+      # print(dat, sig.lsb, sig.type, tmp)
 
       #DEBUG("parse 0x%X %s -> %ld\n", address, sig.name, tmp);
 
       if not self.ignore_checksum:
-        if sig.calc_checksumis is not None and sig.calc_checksum(self.address, sig, dat) != tmp:
+        if sig.calc_checksum is not None and sig.calc_checksum(self.address, sig, dat) != tmp:
           checksum_failed = True
 
       if not self.ignore_counter:
@@ -83,31 +78,32 @@ class MessageState:
           counter_failed = True
 
 
-      tmp_vals[i] = tmp * sig.factor + sig.offset
+      tmp_vals.append(tmp * sig.factor + sig.offset)
 
     # only update values if both checksum and counter are valid
     if (checksum_failed or counter_failed):
-      print("0x%X message checks failed, checksum failed %d, counter failed %d", self.address, checksum_failed, counter_failed);
+      print(f"0x{self.address} message checks failed, checksum failed {checksum_failed}, counter failed {counter_failed}")
+      
       return False
 
     for i in range(len(self.parse_sigs)):
       self.vals[i] = tmp_vals[i]
       self.all_vals[i].append(self.vals[i])
     
-    last_seen_nanos = nanos
+    self.last_seen_nanos = nanos
 
     return True
 
   # bool update_counter_generic(int64_t v, int cnt_size);
   def update_counter_generic(self, v, cnt_size):
-    if (((counter + 1) & ((1 << cnt_size) -1)) != v):
+    if (((self.counter + 1) & ((1 << cnt_size) -1)) != v):
       self.counter_fail = min(self.counter_fail + 1, MAX_BAD_COUNTER)
       if (self.counter_fail > 1):
-        print("0x%X COUNTER FAIL #%d -- %d -> %d\n", self.address, self.counter_fail, counter, v)
+        print(f"0x{self.address} COUNTER FAIL #{self.counter_fail} -- {self.counter} -> {v}\n")
     elif (self.counter_fail > 0):
       self.counter_fail -= 1
     
-    counter = v
+    self.counter = v
     return self.counter_fail < MAX_BAD_COUNTER
     
 
@@ -201,33 +197,33 @@ class cpp_CANParser:
 
       self.message_states[address] = state
 
-  # int abus, const std::string& dbc_name, bool ignore_checksum, bool ignore_counter
-  def CANParser4(self, abus, dbc_name, ignore_checksum, ignore_counter):
-    # Add all messages and signals
-    self.bus = abus
+  # # int abus, const std::string& dbc_name, bool ignore_checksum, bool ignore_counter
+  # def CANParser4(self, abus, dbc_name, ignore_checksum, ignore_counter):
+  #   # Add all messages and signals
+  #   self.bus = abus
 
-    dbc = dbc_lookup(dbc_name)
-    # assert(dbc)
+  #   dbc = dbc_lookup(dbc_name)
+  #   # assert(dbc)
 
-    for msg in dbc.msgs:
-      state = MessageState()
-      state.name = msg.name
-      state.address = msg.address
-      state.size = msg.size
-      state.ignore_checksum = ignore_checksum
-      state.ignore_counter = ignore_counter
+  #   for msg in dbc.msgs:
+  #     state = MessageState()
+  #     state.name = msg.name
+  #     state.address = msg.address
+  #     state.size = msg.size
+  #     state.ignore_checksum = ignore_checksum
+  #     state.ignore_counter = ignore_counter
 
-      for sig in msg.sigs:
-        state.parse_sigs.append(sig)
-        state.vals.append(0)
-        state.all_vals.append([])
+  #     for sig in msg.sigs:
+  #       state.parse_sigs.append(sig)
+  #       state.vals.append(0)
+  #       state.all_vals.append([])
 
-      self.message_states[state.address] = state
+  #     self.message_states[state.address] = state
 
 
 #ifndef DYNAMIC_CAPNP
   # const std::string &data, bool sendcan
-  def update_string(self, data: str, sendcan: bool):
+  def update_string(self, data, sendcan: bool): # data: Event
     # format for board, make copy due to alignment issues.
     # const size_t buf_size = (data.length() / sizeof(capnp::word)) + 1;
     # if (aligned_buf.size() < buf_size) {
@@ -242,13 +238,12 @@ class cpp_CANParser:
     # if (first_nanos == 0) {
     #   first_nanos = event.getLogMonoTime();
     # }
-    # last_nanos = event.getLogMonoTime();
+    last_nanos = data.logMonoTime
 
-    # cans = sendcan ? event.getSendcan() : event.getCan();
-    # self.UpdateCans(last_nanos, cans);
+    cans = data.sendcan if sendcan else data.can
+    self.UpdateCans(last_nanos, cans)
 
-    # self.UpdateValid(last_nanos)
-    pass
+    self.UpdateValid(last_nanos)
 
 
   # const std::vector<std::string> &data, std::vector<SignalValue> &vals, bool sendcan
@@ -266,45 +261,52 @@ class cpp_CANParser:
     #DEBUG("got %d messages\n", cans.size());
     bus_empty = True
 
-    # # parse the messages
-    # for cmsg in cans:
-    #   if (cmsg.getSrc() != bus) {
-    #     # DEBUG("skip %d: wrong bus\n", cmsg.getAddress());
-    #     continue;
-    #   }
-    #   bus_empty = false;
+    # parse the messages
+    for cmsg in cans:
+      if cmsg.src != self.bus:
+        # DEBUG("skip %d: wrong bus\n", cmsg.getAddress());
+        continue
+      bus_empty = False
 
-    #   auto state_it = message_states.find(cmsg.getAddress());
-    #   if (state_it == message_states.end()) {
-    #     # DEBUG("skip %d: not specified\n", cmsg.getAddress());
-    #     continue;
-    #   }
+      ok = cmsg.address in self.message_states
+      if not ok:
+        # DEBUG("skip %d: not specified\n", cmsg.getAddress());
+        continue
+      
+      
+      state_it = self.message_states[cmsg.address]
 
-    #   auto dat = cmsg.getDat();
+      dat = cmsg.dat
 
-    #   if (dat.size() > 64) {
-    #     DEBUG("got message longer than 64 bytes: 0x%X %zu\n", cmsg.getAddress(), dat.size());
-    #     continue;
-    #   }
+      if (len(dat) > 64):
+        print(f"got message longer than 64 bytes: 0x{cmsg.address} {len(dat)}u\n")
+        continue
 
-    #   # TODO: this actually triggers for some cars. fix and enable this
-    #   #if (dat.size() != state_it->second.size) {
-    #   #  DEBUG("got message with unexpected length: expected %d, got %zu for %d", state_it->second.size, dat.size(), cmsg.getAddress());
-    #   #  continue;
-    #   #}
+      # TODO: this actually triggers for some cars. fix and enable this
+      #if (dat.size() != state_it->second.size) {
+      #  DEBUG("got message with unexpected length: expected %d, got %zu for %d", state_it->second.size, dat.size(), cmsg.getAddress());
+      #  continue;
+      #}
 
-    #   # TODO: can remove when we ignore unexpected can msg lengths
-    #   # make sure the data_size is not less than state_it->second.size
-    #   size_t data_size = std::max<size_t>(dat.size(), state_it->second.size);
-    #   std::vector<uint8_t> data(data_size, 0);
-    #   memcpy(data.data(), dat.begin(), dat.size());
-    #   state_it->second.parse(nanos, data);
+      # TODO: can remove when we ignore unexpected can msg lengths
+      # make sure the data_size is not less than state_it->second.size
+      # size_t data_size = max(len(dat.size(), state_it->second.size);
+      # std::vector<uint8_t> data(data_size, 0);
+      # memcpy(data.data(), dat.begin(), dat.size());
+      # data = [0 for i in range(len(dat))]
+      # cmsg.data abc
+      
+      state_it.parse(nanos, dat)
 
-    # # update bus timeout
-    # if not bus_empty:
-    #   last_nonempty_nanos = nanos
+      # """
+
+      # self.message_states[cmsg.address] = state_it
+
+    # update bus timeout
+    if not bus_empty:
+      self.last_nonempty_nanos = nanos
     
-    # self.bus_timeout = (nanos - last_nonempty_nanos) > bus_timeout_threshold
+    self.bus_timeout = (nanos - self.last_nonempty_nanos) > self.bus_timeout_threshold
   #endif
 
   # # uint64_t nanos, const capnp::DynamicStruct::Reader& cmsg
@@ -337,7 +339,7 @@ class cpp_CANParser:
     _valid = True
     _counters_valid = True
     for kv in self.message_states:
-      state = kv # state = kv.second;
+      state = self.message_states[kv] # state = kv.second;
 
       if (state.counter_fail >= MAX_BAD_COUNTER):
         _counters_valid = False
@@ -430,7 +432,7 @@ class CANParser:
 
     self.can = cpp_CANParser()
     self.can.CANParser3(bus, dbc_name, message_v)
-    self.update_strings([])
+    # self.update_strings([])
 
   def __dealloc__(self):
     if self.can:
@@ -442,10 +444,10 @@ class CANParser:
 
     new_vals: list[SignalValue] = []
     cur_address = -1
-    vl = {}
-    vl_all = {}
-    ts_nanos = {}
-    updated_addrs = set()
+    # vl = {}
+    # vl_all = {}
+    # ts_nanos = {}
+    # updated_addrs = set()
 
     # print(strings)
     # exit()
@@ -461,7 +463,7 @@ class CANParser:
         vl = self.vl[cur_address]
         vl_all = self.vl_all[cur_address]
         ts_nanos = self.ts_nanos[cur_address]
-        updated_addrs.add(cur_address)
+        # updated_addrs.add(cur_address)
 
       # Cast char * directly to unicode
       cv_name = cv.name
@@ -469,8 +471,14 @@ class CANParser:
       vl_all[cv_name] = cv.all_values
       ts_nanos[cv_name] = cv.ts_nanos
       # preinc(it)
+    
+    
+    del new_vals
+    # del vl, vl_all, ts
 
-    return updated_addrs
+    # del vl, vl_all, ts_nanos
+
+    # return updated_addrs
 
   @property
   def can_valid(self):

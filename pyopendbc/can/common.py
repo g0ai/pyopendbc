@@ -1,5 +1,4 @@
-#include "opendbc/can/common.h"
-
+import numpy as np
 
 MAX_BAD_COUNTER = 5
 CAN_INVALID_CNT = 5
@@ -21,14 +20,20 @@ def honda_checksum(address, sig, d):
 
   return s & 0xF
 
-# unsigned int toyota_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
-#   unsigned int s = d.size();
-#   while (address) { s += address & 0xFF; address >>= 8; }
-#   for (int i = 0; i < d.size() - 1; i++) { s += d[i]; }
 
-#   return s & 0xFF;
-# }
+# uint32_t address, const Signal &sig, const std::vector<uint8_t> &d
+def toyota_checksum(address, sig, d):
+  address = np.uint32(address)
+  s = len(d)
+  while (address):
+    s += address & 0xFF
+    address >>= 8
+  for i in range(len(d)-1):
+    s += np.uint8(d[i])
 
+  return s & 0xFF
+
+# TODO
 # unsigned int subaru_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
 #   unsigned int s = 0;
 #   while (address) { s += address & 0xFF; address >>= 8; }
@@ -39,6 +44,7 @@ def honda_checksum(address, sig, d):
 #   return s & 0xFF;
 # }
 
+# TODO
 # unsigned int chrysler_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
 #   // jeep chrysler canbus checksum from http://illmatics.com/Remote%20Car%20Hacking.pdf
 #   uint8_t checksum = 0xFF;
@@ -71,29 +77,29 @@ def honda_checksum(address, sig, d):
 # }
 
 # Static lookup table for fast computation of CRCs
-crc8_lut_8h2f = [0 for i in range(256)] # CRC8 poly 0x2F, aka 8H2F/AUTOSAR # len 256
-crc16_lut_xmodem = [0 for i in range(256)] # CRC16 poly 0x1021, aka XMODEM # len 256
+crc8_lut_8h2f = [np.uint8(0) for i in range(256)] # CRC8 poly 0x2F, aka 8H2F/AUTOSAR # len 256
+crc16_lut_xmodem = [np.uint16(0) for i in range(256)] # CRC16 poly 0x1021, aka XMODEM # len 256
 
 # uint8_t poly, uint8_t crc_lut[]
 def gen_crc_lookup_table_8(poly, crc_lut):
-  crc = 0
+  crc = np.uint8(0)
   for i in range(256):
-    crc = i
+    crc = np.uint8(i)
     for j in range(8):
       if ((crc & 0x80) != 0):
-        crc = ((crc << 1) ^ poly)
+        crc = np.uint8((crc << 1) ^ poly)
       else:
         crc <<= 1
   crc_lut[i] = crc
 
 # uint16_t poly, uint16_t crc_lut[]
 def gen_crc_lookup_table_16(poly, crc_lut):
-  crc = 0
+  crc = np.uint16(0)
   for i in range(256):
-    crc = i << 8
+    crc = np.uint16(i << 8)
     for j in range(8):
       if ((crc & 0x8000) != 0):
-        crc = ((crc << 1) ^ poly)
+        crc = np.uint16((crc << 1) ^ poly)
       else:
         crc <<= 1
     crc_lut[i] = crc
@@ -101,12 +107,14 @@ def gen_crc_lookup_table_16(poly, crc_lut):
 # Initializes CRC lookup tables at module initialization
 class CrcInitializer:
   # def __init__(self):
-  crc8_lut_8h2f = gen_crc_lookup_table_8(0x2F, crc8_lut_8h2f);    # CRC-8 8H2F/AUTOSAR for Volkswagen
-  crc16_lut_xmodem = gen_crc_lookup_table_16(0x1021, crc16_lut_xmodem);    # CRC-16 XMODEM for HKG CAN FD
+  gen_crc_lookup_table_8(0x2F, crc8_lut_8h2f);    # CRC-8 8H2F/AUTOSAR for Volkswagen
+  gen_crc_lookup_table_16(0x1021, crc16_lut_xmodem);    # CRC-16 XMODEM for HKG CAN FD
 
 
 crcInitializer = CrcInitializer()
 
+
+# TODO
 # unsigned int volkswagen_mqb_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
 #   // Volkswagen uses standard CRC8 8H2F/AUTOSAR, but they compute it with
 #   // a magic variable padding byte tacked onto the end of the payload.
@@ -201,6 +209,7 @@ def xor_checksum(address, sig, d):
   return checksum
 
 
+# TODO
 # unsigned int pedal_checksum(uint32_t address, const Signal &sig, const std::vector<uint8_t> &d) {
 #   uint8_t crc = 0xFF;
 #   uint8_t poly = 0xD5; // standard crc8
@@ -221,14 +230,16 @@ def xor_checksum(address, sig, d):
 
 # uint32_t address, const Signal &sig, const std::vector<uint8_t> &d
 def hkg_can_fd_checksum(address, sig, d):
-  crc = 0
+  address = np.uint32(address)
+  
+  crc = np.uint16(0)
 
   for i in range(2, len(d)):
-    crc = (crc << 8) ^ crc16_lut_xmodem[((crc >> 8) ^ d[i]) % 256]
+    crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ np.uint8(d[i])]
 
   # Add address to crc
-  crc = (crc << 8) ^ crc16_lut_xmodem[((crc >> 8) ^ ((address >> 0) & 0xFF)) % 256]
-  crc = (crc << 8) ^ crc16_lut_xmodem[((crc >> 8) ^ ((address >> 8) & 0xFF)) % 256]
+  crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ ((address >> 0) & 0xFF)]
+  crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ ((address >> 8) & 0xFF)]
 
   if (len(d) == 8):
     crc ^= 0x5f29
@@ -240,9 +251,3 @@ def hkg_can_fd_checksum(address, sig, d):
     crc ^= 0x9f5b
 
   return crc
-
-
-
-# from .parser import MessageState #, CANParser
-
-# from .packer import CANPacker

@@ -1,14 +1,5 @@
-#pragma once
-
-#include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
 from enum import Enum
-import os
 
-# from .dbc import dbc_parse_from_stream, dbc_lookup # , get_dbc_names
 
 class SignalPackValue:
   name = ""
@@ -37,7 +28,7 @@ class SignalType(Enum):
 class Signal:
   name = ""
   start_bit = 0
-  ms = 0
+  msb = 0
   lsb = 0
   size = 0
   is_signed = False

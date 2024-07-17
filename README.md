@@ -1,2 +1,2 @@
 # pyopendbc
-Pythonic alternative to the OpenDBC library.
+minimal pythonic alternative to the OpenDBC library
