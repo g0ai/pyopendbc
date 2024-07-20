@@ -3,7 +3,7 @@ from .dbc import dbc_lookup
 
 import numpy as np
 
-IULL = np.uint64(1)
+IULL = np.uint32(1) # 64
 
 class CANPacker:
   def __init__(self, dbc_name):
@@ -143,7 +143,7 @@ def set_value(msg, sig, ival):
   bits = sig.size
   # USELESS ??
   if sig.size < 64:
-    ival &= np.int64((IULL << sig.size) - 1)
+    ival &= np.int64((IULL << sig.size) - 1) # int64
 
   while (i >= 0 and i < len(msg) and bits > 0):
     shift = sig.lsb % 8 if (sig.lsb // 8) == i else 0

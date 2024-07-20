@@ -235,11 +235,11 @@ def hkg_can_fd_checksum(address, sig, d):
   crc = np.uint16(0)
 
   for i in range(2, len(d)):
-    crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ np.uint8(d[i])]
+    crc = (crc << 8) ^ crc16_lut_xmodem[np.uint8((crc >> 8) ^ np.uint8(d[i]))]
 
   # Add address to crc
-  crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ ((address >> 0) & 0xFF)]
-  crc = (crc << 8) ^ crc16_lut_xmodem[(crc >> 8) ^ ((address >> 8) & 0xFF)]
+  crc = (crc << 8) ^ crc16_lut_xmodem[np.uint8((crc >> 8) ^ ((address >> 0) & 0xFF))]
+  crc = (crc << 8) ^ crc16_lut_xmodem[np.uint8((crc >> 8) ^ ((address >> 8) & 0xFF))]
 
   if (len(d) == 8):
     crc ^= 0x5f29
