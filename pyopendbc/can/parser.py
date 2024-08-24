@@ -27,7 +27,7 @@ def get_raw_value(msg, sig):
 
     bits -= size
     i = i-1 if sig.is_little_endian else i+1
-  return ret
+  return np.int64(ret)
 
 
 class MessageState:
@@ -62,6 +62,11 @@ class MessageState:
 
       tmp = get_raw_value(dat, sig)
       if (sig.is_signed):
+        # tmp = tmp # - (IULL << sig.size if ((tmp >> (sig.size-1)) & 0x1) else 0)
+        if ((tmp >> (sig.size-1)) & 0x1):
+          tmp = np.int64(tmp)
+          # print(sig.size, IULL, IULL << sig.size, type(tmp))
+          # print()
         tmp -= IULL << sig.size if ((tmp >> (sig.size-1)) & 0x1) else 0
       
 
